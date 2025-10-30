@@ -21,98 +21,148 @@ SlamSystem::SlamSystem(lightning::SlamSystem::Options options) : options_(option
     signal(SIGINT, lightning::debug::SigHandle);
 }
 
+/**
+ * [功能描述]：初始化SLAM系统的所有模块和组件
+ * @param yaml_path：配置文件的路径，包含系统各模块的参数配置
+ * @return 成功返回true，失败返回false
+ * 
+ * 初始化流程包括：
+ * 1. 初始化激光惯性里程计（LIO）模块
+ * 2. 加载配置文件，读取系统选项
+ * 3. 根据配置初始化可选模块：回环检测、3D可视化、2D网格地图、在线ROS2节点等
+ */
 bool SlamSystem::Init(const std::string& yaml_path) {
+    // 创建激光惯性里程计（Laser-Inertial Odometry）模块实例
     lio_ = std::make_shared<LaserMapping>();
+    
+    // 初始化LIO模块，若初始化失败则返回错误
     if (!lio_->Init(yaml_path)) {
         LOG(ERROR) << "failed to init lio module";
         return false;
     }
 
+    // 加载YAML配置文件
     auto yaml = YAML::LoadFile(yaml_path);
-    options_.with_loop_closing_ = yaml["system"]["with_loop_closing"].as<bool>();
-    options_.with_visualization_ = yaml["system"]["with_ui"].as<bool>();
-    options_.with_2dvisualization_ = yaml["system"]["with_2dui"].as<bool>();
-    options_.with_gridmap_ = yaml["system"]["with_g2p5"].as<bool>();
-    options_.step_on_kf_ = yaml["system"]["step_on_kf"].as<bool>();
+    
+    // 从配置文件读取系统选项参数
+    options_.with_loop_closing_ = yaml["system"]["with_loop_closing"].as<bool>();      // 是否启用回环检测
+    options_.with_visualization_ = yaml["system"]["with_ui"].as<bool>();               // 是否启用3D可视化界面
+    options_.with_2dvisualization_ = yaml["system"]["with_2dui"].as<bool>();           // 是否启用2D可视化界面
+    options_.with_gridmap_ = yaml["system"]["with_g2p5"].as<bool>();                   // 是否启用G2P5网格地图
+    options_.step_on_kf_ = yaml["system"]["step_on_kf"].as<bool>();                    // 是否在关键帧处暂停等待用户操作
 
+    // 根据配置初始化回环检测模块
     if (options_.with_loop_closing_) {
         LOG(INFO) << "slam with loop closing";
+        
+        // 创建回环检测选项并设置在线模式标志
         LoopClosing::Options options;
         options.online_mode_ = options_.online_mode_;
+        
+        // 创建并初始化回环检测模块
         lc_ = std::make_shared<LoopClosing>(options);
         lc_->Init(yaml_path);
     }
 
+    // 根据配置初始化3D可视化界面
     if (options_.with_visualization_) {
         LOG(INFO) << "slam with 3D UI";
+        
+        // 创建Pangolin 3D可视化窗口
         ui_ = std::make_shared<ui::PangolinWindow>();
         ui_->Init();
 
+        // 将可视化界面设置到LIO模块，使其能够实时显示建图结果
         lio_->SetUI(ui_);
     }
 
+    // 根据配置初始化G2P5网格地图模块
     if (options_.with_gridmap_) {
+        // 创建G2P5配置选项
         g2p5::G2P5::Options opt;
         opt.online_mode_ = options_.online_mode_;
 
+        // 创建并初始化G2P5网格地图模块
         g2p5_ = std::make_shared<g2p5::G2P5>(opt);
         g2p5_->Init(yaml_path);
 
+        // 如果同时启用了回环检测，设置回环闭合回调函数
         if (options_.with_loop_closing_) {
-            /// 当发生回环时，触发一次重绘
+            /// 当发生回环时，触发一次重绘，更新全局地图
             lc_->SetLoopClosedCB([this]() { g2p5_->RedrawGlobalMap(); });
         }
 
+        // 如果启用了2D可视化，设置地图更新回调函数
         if (options_.with_2dvisualization_) {
             g2p5_->SetMapUpdateCallback([this](g2p5::G2P5MapPtr map) {
+                // 将网格地图转换为OpenCV图像格式
                 cv::Mat image = map->ToCV();
+                
+                // 显示2D地图
                 cv::imshow("map", image);
 
+                // 根据配置决定是否在每个关键帧处暂停
                 if (options_.step_on_kf_) {
-                    cv::waitKey(0);
-
+                    cv::waitKey(0);      // 等待用户按键继续（用于调试）
                 } else {
-                    cv::waitKey(10);
+                    cv::waitKey(10);     // 等待10ms刷新显示
                 }
             });
         }
     }
 
+    // 如果是在线模式，创建ROS2节点和订阅器
     if (options_.online_mode_) {
         LOG(INFO) << "online mode, creating ros2 node ... ";
 
-        /// subscribers
+        /// 创建ROS2节点，节点名为"lightning_slam"
         node_ = std::make_shared<rclcpp::Node>("lightning_slam");
 
-        imu_topic_ = yaml["common"]["imu_topic"].as<std::string>();
-        cloud_topic_ = yaml["common"]["lidar_topic"].as<std::string>();
-        livox_topic_ = yaml["common"]["livox_lidar_topic"].as<std::string>();
+        // 从配置文件读取传感器话题名称
+        imu_topic_ = yaml["common"]["imu_topic"].as<std::string>();                    // IMU话题
+        cloud_topic_ = yaml["common"]["lidar_topic"].as<std::string>();                // 激光雷达点云话题
+        livox_topic_ = yaml["common"]["livox_lidar_topic"].as<std::string>();          // Livox雷达话题
 
+        // 设置ROS2 QoS（服务质量）策略，队列大小为10
         rclcpp::QoS qos(10);
-        // qos.best_effort();
+        // qos.best_effort();  // 可选：设置为尽力而为模式
 
+        // 创建IMU数据订阅器
         imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
             imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
+                // 创建IMU数据结构
                 IMUPtr imu = std::make_shared<IMU>();
+                
+                // 转换时间戳为秒
                 imu->timestamp = ToSec(msg->header.stamp);
+                
+                // 提取线性加速度（m/s²），转换为Vec3d格式
                 imu->linear_acceleration =
                     Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
+                
+                // 提取角速度（rad/s），转换为Vec3d格式
                 imu->angular_velocity =
                     Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
 
+                // 处理IMU数据
                 ProcessIMU(imu);
             });
 
+        // 创建标准点云订阅器（sensor_msgs::PointCloud2格式）
         cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
             cloud_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+                // 使用计时器评估点云处理性能，记录处理时间
                 Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
             });
 
+        // 创建Livox自定义点云订阅器（Livox专用格式）
         livox_sub_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
             livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg ::SharedPtr cloud) {
+                // 使用计时器评估点云处理性能
                 Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
             });
 
+        // 创建保存地图服务，响应外部保存地图请求
         savemap_service_ = node_->create_service<SaveMapService>(
             "lightning/save_map", [this](const SaveMapService::Request::SharedPtr& req,
                                          SaveMapService::Response::SharedPtr res) { SaveMap(req, res); });
@@ -120,6 +170,7 @@ bool SlamSystem::Init(const std::string& yaml_path) {
         LOG(INFO) << "online slam node has been created.";
     }
 
+    // 初始化成功
     return true;
 }
 
