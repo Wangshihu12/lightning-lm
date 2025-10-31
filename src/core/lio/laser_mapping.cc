@@ -623,132 +623,195 @@ void LaserMapping::MapIncremental() {
 }
 
 /**
- * Lidar point cloud registration
- * will be called by the eskf custom observation model
- * compute point-to-plane residual here
- * @param s kf state
- * @param ekfom_data H matrix
+ * [功能描述]：激光雷达点云配准观测模型
+ * @param s：导航状态，包含位置、旋转、IMU偏差、外参等
+ * @param obs：自定义观测模型数据结构，用于存储雅可比矩阵H和残差
+ * @return 无返回值
+ * 
+ * 该函数被ESKF的自定义观测模型调用，执行以下操作：
+ * 1. 将点云从雷达坐标系转换到世界坐标系
+ * 2. 在局部地图中查找最近邻点并拟合平面
+ * 3. 计算点到平面的残差（距离）
+ * 4. 计算观测模型的雅可比矩阵H
+ * 
+ * 这是IEKF中的观测更新步骤，通过点云配准约束来修正状态估计
  */
 void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
+    // 获取降采样后的点云数量
     int cnt_pts = scan_down_body_->size();
 
+    // 创建索引数组，用于并行处理
     std::vector<size_t> index(cnt_pts);
     for (size_t i = 0; i < index.size(); ++i) {
         index[i] = i;
     }
 
+    // 第一阶段：激光雷达点云匹配，计算点到平面的残差
     Timer::Evaluate(
         [&, this]() {
+            // 计算世界坐标系到雷达坐标系的旋转矩阵：R_wl = R_wb * R_bl
             auto R_wl = (s.rot_ * s.offset_R_lidar_).cast<float>();
+            
+            // 计算雷达在世界坐标系下的位置：t_wl = R_wb * t_bl + t_wb
             auto t_wl = (s.rot_ * s.offset_t_lidar_ + s.pos_).cast<float>();
 
+            // 并行处理每个点（使用无序并行执行策略提高效率）
             std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
-                PointType &point_body = scan_down_body_->points[i];
-                PointType &point_world = scan_down_world_->points[i];
+                PointType &point_body = scan_down_body_->points[i];      // 雷达坐标系下的点
+                PointType &point_world = scan_down_world_->points[i];    // 世界坐标系下的点
 
-                /* transform to world frame */
+                /* 将点从雷达坐标系转换到世界坐标系 */
                 Vec3f p_body = point_body.getVector3fMap();
-                point_world.getVector3fMap() = R_wl * p_body + t_wl;
-                point_world.intensity = point_body.intensity;
+                point_world.getVector3fMap() = R_wl * p_body + t_wl;     // p_w = R_wl * p_b + t_wl
+                point_world.intensity = point_body.intensity;             // 保留强度信息
 
+                // 获取当前点的最近邻点容器
                 auto &points_near = nearest_points_[i];
 
-                /** Find the closest surfaces in the map **/
-                // if (obs.converge_) {
+                /** 在局部地图中查找最近的表面点 **/
+                // 从iVox地图中获取最近邻点（数量为NUM_MATCH_POINTS）
                 ivox_->GetClosestPoint(point_world, points_near, fasterlio::NUM_MATCH_POINTS);
+                
+                // 检查最近邻点数量是否足够进行平面拟合
                 point_selected_surf_[i] = points_near.size() >= fasterlio::MIN_NUM_MATCH_POINTS;
+                
+                // 如果最近邻点足够，尝试拟合平面
                 if (point_selected_surf_[i]) {
+                    // 使用最小二乘法拟合平面，得到平面系数 [nx, ny, nz, d]
+                    // 平面方程：nx*x + ny*y + nz*z + d = 0
                     point_selected_surf_[i] =
                         math::esti_plane(plane_coef_[i], points_near, fasterlio::ESTI_PLANE_THRESHOLD);
                 }
 
+                // 如果平面拟合成功，计算点到平面的距离（残差）
                 if (point_selected_surf_[i]) {
+                    // 将点坐标转换为齐次坐标 [x, y, z, 1]
                     auto temp = point_world.getVector4fMap();
                     temp[3] = 1.0;
+                    
+                    // 计算点到平面的有符号距离：d = n^T * p + d
                     float pd2 = plane_coef_[i].dot(temp);
 
+                    // 验证对应关系的有效性：距离应该与点的深度成合理比例
+                    // 这个判据用于过滤不可靠的匹配（81是经验系数）
                     bool valid_corr = p_body.norm() > 81 * pd2 * pd2;
                     if (valid_corr) {
                         point_selected_surf_[i] = true;
-                        residuals_[i] = pd2;
+                        residuals_[i] = pd2;  // 保存残差
                     }
                 }
             });
         },
         "    ObsModel (Lidar Match)");
 
+    // 统计有效特征点数量
     effect_feat_num_ = 0;
 
+    // 预分配内存，存储对应点和平面法向量
     corr_pts_.resize(cnt_pts);
     corr_norm_.resize(cnt_pts);
+    
+    // 筛选有效的特征点，压缩数组
     for (int i = 0; i < cnt_pts; i++) {
         if (point_selected_surf_[i]) {
+            // 保存平面法向量（含d值）：[nx, ny, nz, d]
             corr_norm_[effect_feat_num_] = plane_coef_[i];
+            
+            // 保存雷达坐标系下的点坐标：[x, y, z, residual]
             corr_pts_[effect_feat_num_] = scan_down_body_->points[i].getVector4fMap();
-            corr_pts_[effect_feat_num_][3] = residuals_[i];
+            corr_pts_[effect_feat_num_][3] = residuals_[i];  // 将残差存储在第4个分量
 
             effect_feat_num_++;
         }
     }
+    
+    // 调整数组大小，移除无效点
     corr_pts_.resize(effect_feat_num_);
     corr_norm_.resize(effect_feat_num_);
 
+    // 如果没有有效特征点，观测无效，返回
     if (effect_feat_num_ < 1) {
         obs.valid_ = false;
         LOG(WARNING) << "No Effective Points!";
         return;
     }
 
+    // 第二阶段：计算雅可比矩阵H和残差向量
     Timer::Evaluate(
         [&, this]() {
-            /*** Computation of Measurement Jacobian matrix H and measurements vector ***/
-            obs.h_x_ = Eigen::MatrixXd::Zero(effect_feat_num_, 12);  // 23
+            /*** 计算观测模型的雅可比矩阵H和测量向量 ***/
+            // 雅可比矩阵维度：effect_feat_num_ × 12
+            // 12维包括：位置(3) + 旋转(3) + 外参旋转(3) + 外参平移(3)
+            obs.h_x_ = Eigen::MatrixXd::Zero(effect_feat_num_, 12);
             obs.residual_.resize(effect_feat_num_);
 
+            // 调整索引数组大小为有效特征点数量
             index.resize(effect_feat_num_);
-            const Mat3f off_R = s.offset_R_lidar_.matrix().cast<float>();
-            const Vec3f off_t = s.offset_t_lidar_.cast<float>();
-            const Mat3f Rt = s.rot_.matrix().transpose().cast<float>();
+            
+            // 预计算常用变换矩阵，避免重复计算
+            const Mat3f off_R = s.offset_R_lidar_.matrix().cast<float>();    // 雷达外参旋转矩阵
+            const Vec3f off_t = s.offset_t_lidar_.cast<float>();             // 雷达外参平移向量
+            const Mat3f Rt = s.rot_.matrix().transpose().cast<float>();      // 世界到机体的旋转矩阵
 
+            // 并行计算每个有效特征点的雅可比矩阵
             std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
+                // 获取雷达坐标系下的点坐标
                 Vec3f point_this_be = corr_pts_[i].head<3>();
+                
+                // 计算点的反对称矩阵（用于叉乘运算）
                 Mat3f point_be_crossmat = math::SKEW_SYM_MATRIX(point_this_be);
+                
+                // 将点从雷达坐标系转换到机体坐标系
                 Vec3f point_this = off_R * point_this_be + off_t;
                 Mat3f point_crossmat = math::SKEW_SYM_MATRIX(point_this);
 
-                /*** get the normal vector of closest surface/corner ***/
-                Vec3f norm_vec = corr_norm_[i].head<3>();
+                /*** 获取最近平面的法向量 ***/
+                Vec3f norm_vec = corr_norm_[i].head<3>();  // [nx, ny, nz]
 
-                /*** calculate the Measurement Jacobian matrix H ***/
+                /*** 计算观测模型的雅可比矩阵H ***/
+                // C = R_wb^T * n：法向量在机体坐标系下的表示
                 Vec3f C(Rt * norm_vec);
+                
+                // A = [p]_× * C：对旋转的雅可比
                 Vec3f A(point_crossmat * C);
 
+                // 根据是否估计外参，填充雅可比矩阵的不同列
                 if (extrinsic_est_en_) {
+                    // 如果估计外参，计算外参相关的雅可比
+                    // B = [p_b]_× * R_bl^T * C：对外参旋转的雅可比
                     Vec3f B(point_be_crossmat * off_R.transpose() * C);
+                    
+                    // 雅可比矩阵H的第i行：[∂r/∂p, ∂r/∂θ, ∂r/∂θ_bl, ∂r/∂t_bl]
                     obs.h_x_.block<1, 12>(i, 0) << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], B[0], B[1],
                         B[2], C[0], C[1], C[2];
                 } else {
+                    // 如果不估计外参，外参相关的雅可比置零
                     obs.h_x_.block<1, 12>(i, 0) << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], 0.0, 0.0,
                         0.0, 0.0, 0.0, 0.0;
                 }
 
-                /*** Measurement: distance to the closest surface/corner ***/
-                obs.residual_(i) = -corr_pts_[i][3];
+                /*** 测量值：点到最近平面/角点的距离（残差）***/
+                obs.residual_(i) = -corr_pts_[i][3];  // 取负号是因为残差定义为 r = -(n^T*p + d)
             });
         },
         "    ObsModel (IEKF Build Jacobian)");
 
-    /// 填入中位数平方误差
+    /// 计算并填入残差统计信息（用于自适应调整观测噪声）
     std::vector<double> res_sq2;
     for (size_t i = 0; i < cnt_pts; ++i) {
         if (point_selected_surf_[i]) {
             double r = residuals_[i];
-            res_sq2.emplace_back(r * r);
+            res_sq2.emplace_back(r * r);  // 保存残差的平方
         }
     }
 
+    // 对残差平方排序，用于计算中位数和最大值
     std::sort(res_sq2.begin(), res_sq2.end());
+    
+    // 保存中位数残差平方（鲁棒的误差估计）
     obs.lidar_residual_mean_ = res_sq2[res_sq2.size() / 2];
+    
+    // 保存最大残差平方（用于检测异常）
     obs.lidar_residual_max_ = res_sq2[res_sq2.size() - 1];
 }
 
