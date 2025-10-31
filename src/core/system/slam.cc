@@ -321,33 +321,57 @@ void SlamSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cl
     }
 }
 
+/**
+ * [功能描述]：处理Livox激光雷达的自定义格式点云数据
+ * @param cloud：Livox雷达的自定义消息格式点云数据（SharedPtr智能指针）
+ * @return 无返回值
+ * 
+ * 处理流程：
+ * 1. 检查系统运行状态
+ * 2. 将点云数据输入LIO模块进行处理
+ * 3. 运行LIO算法，进行位姿估计和建图
+ * 4. 获取生成的关键帧并分发到各个模块（回环检测、网格地图、可视化）
+ */
 void SlamSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr& cloud) {
+    // 检查SLAM系统是否处于运行状态，如果未运行则直接返回
     if (running_ == false) {
         return;
     }
 
+    // 将Livox点云数据传递给LIO模块进行预处理
     lio_->ProcessPointCloud2(cloud);
+    
+    // 运行LIO算法，执行IMU积分、点云配准、位姿优化等操作
     lio_->Run();
 
+    // 获取LIO模块生成的最新关键帧
     auto kf = lio_->GetKeyframe();
+    
+    // 检查是否生成了新的关键帧
     if (kf != cur_kf_) {
+        // 更新当前关键帧指针
         cur_kf_ = kf;
     } else {
+        // 如果没有新的关键帧生成，直接返回
         return;
     }
 
+    // 验证关键帧指针的有效性
     if (cur_kf_ == nullptr) {
         return;
     }
 
+    // 如果启用了回环检测模块，将新关键帧加入回环检测队列
     if (options_.with_loop_closing_) {
         lc_->AddKF(cur_kf_);
     }
 
+    // 如果启用了网格地图模块，将新关键帧推送到G2P5模块进行地图更新
     if (options_.with_gridmap_) {
         g2p5_->PushKeyframe(cur_kf_);
     }
 
+    // 如果启用了3D可视化界面，更新显示的关键帧信息
     if (ui_) {
         ui_->UpdateKF(cur_kf_);
     }

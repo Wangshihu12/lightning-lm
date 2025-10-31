@@ -10,23 +10,50 @@
 
 namespace lightning {
 
+/**
+ * [功能描述]：初始化激光建图模块
+ * @param config_yaml：YAML配置文件路径，包含LIO系统的所有参数配置
+ * @return 成功返回true，失败返回false
+ * 
+ * 初始化流程：
+ * 1. 从YAML文件加载参数配置
+ * 2. 创建并初始化iVox增量体素地图结构（用于局部地图维护）
+ * 3. 配置并初始化ESKF误差状态卡尔曼滤波器（用于状态估计）
+ */
 bool LaserMapping::Init(const std::string &config_yaml) {
+    // 记录初始化日志，显示配置文件路径
     LOG(INFO) << "init laser mapping from " << config_yaml;
+    
+    // 从YAML配置文件加载参数，包括传感器参数、滤波器参数、地图参数等
     if (!LoadParamsFromYAML(config_yaml)) {
         return false;
     }
 
-    // localmap init (after LoadParams)
+    // 初始化局部地图结构（必须在LoadParams之后，因为需要使用加载的参数）
+    // iVox是一种增量体素结构，用于高效的最近邻搜索和局部地图维护
     ivox_ = std::make_shared<IVoxType>(ivox_options_);
 
-    // esekf init
+    // 初始化ESKF（误差状态卡尔曼滤波器）配置选项
     ESKF::Options eskf_options;
+    
+    // 设置最大迭代次数，用于iterated ESKF的迭代优化
     eskf_options.max_iterations_ = fasterlio::NUM_MAX_ITERATIONS;
+    
+    // 设置收敛阈值向量（23维状态的误差阈值）
+    // epsi: 1e-3 * [1,1,...,1]^T，用于判断迭代是否收敛
+    // 23维状态包括：位置(3) + 速度(3) + 旋转(3) + 加速度偏差(3) + 陀螺仪偏差(3) + 重力(3) + 外参平移(3) + 外参旋转(2)
     eskf_options.epsi_ = 1e-3 * Eigen::Matrix<double, 23, 1>::Ones();
+    
+    // 设置激光雷达观测模型函数（lambda表达式），用于计算残差和雅可比矩阵
     eskf_options.lidar_obs_func_ = [this](NavState &s, ESKF::CustomObservationModel &obs) { ObsModel(s, obs); };
+    
+    // 设置是否使用Anderson加速（AA），可以加快ESKF迭代收敛速度
     eskf_options.use_aa_ = use_aa_;
+    
+    // 使用配置的选项初始化卡尔曼滤波器
     kf_.Init(eskf_options);
 
+    // 初始化成功
     return true;
 }
 
@@ -118,70 +145,117 @@ LaserMapping::LaserMapping(Options options) : options_(options) {
     p_imu_.reset(new ImuProcess());
 }
 
+/**
+ * [功能描述]：处理IMU数据，进行状态预测和缓冲区管理
+ * @param imu：IMU数据指针，包含时间戳、角速度和线性加速度
+ * @return 无返回值
+ * 
+ * 处理流程：
+ * 1. 检查时间戳合法性，处理时间回退情况
+ * 2. 如果IMU已初始化，使用卡尔曼滤波器进行状态预测
+ * 3. 更新可视化界面显示最新状态
+ * 4. 将IMU数据加入缓冲区供后续处理使用
+ */
 void LaserMapping::ProcessIMU(const lightning::IMUPtr &imu) {
+    // 增加发布计数器，用于统计处理的数据量
     publish_count_++;
 
+    // 提取当前IMU数据的时间戳
     double timestamp = imu->timestamp;
 
+    // 加锁保护共享的IMU缓冲区，防止多线程访问冲突
     UL lock(mtx_buffer_);
+    
+    // 检查时间戳是否发生回退（异常情况，可能由于数据重播或系统时间错误）
     if (timestamp < last_timestamp_imu_) {
         LOG(WARNING) << "imu loop back, clear buffer";
+        // 清空IMU缓冲区，避免时间戳顺序混乱
         imu_buffer_.clear();
     }
 
+    // 检查IMU预处理模块是否已经完成初始化（需要一定数量的IMU数据来估计初始状态）
     if (p_imu_->IsIMUInited()) {
-        /// 更新最新imu状态
+        /// 使用高频IMU卡尔曼滤波器预测最新的IMU状态
+        // 根据时间增量、过程噪声协方差矩阵Q、角速度（rad/s）、线性加速度（m/s²）进行预测
         kf_imu_.Predict(timestamp - last_timestamp_imu_, p_imu_->Q_, imu->angular_velocity, imu->linear_acceleration);
 
         // LOG(INFO) << "newest wrt lidar: " << timestamp - kf_.GetX().timestamp_;
 
-        /// 更新ui
+        /// 如果启用了可视化界面，更新显示最新的导航状态（位姿、速度等）
         if (ui_) {
             ui_->UpdateNavState(kf_imu_.GetX());
         }
     }
 
+    // 更新上一次处理的IMU时间戳，用于下次计算时间增量
     last_timestamp_imu_ = timestamp;
 
+    // 将当前IMU数据添加到缓冲区尾部，供后续与激光雷达数据融合使用
     imu_buffer_.emplace_back(imu);
 }
 
+/**
+ * [功能描述]：激光建图的主运行函数，执行LIO系统的核心处理流程
+ * @return 成功返回true，失败或跳过返回false
+ * 
+ * 主要处理流程：
+ * 1. 同步IMU和激光雷达数据
+ * 2. IMU积分、卡尔曼滤波预测和点云运动畸变校正
+ * 3. 处理第一帧扫描（初始化地图）
+ * 4. 点云降采样
+ * 5. IEKF迭代优化求解位姿
+ * 6. 增量式更新局部地图
+ * 7. 根据阈值判断是否生成新的关键帧
+ * 8. 更新高频IMU状态估计
+ */
 bool LaserMapping::Run() {
+    // 同步IMU和激光雷达数据包，确保数据时间对齐
     if (!SyncPackages()) {
         return false;
     }
 
-    /// IMU process, kf prediction, undistortion
+    /// IMU数据处理：执行IMU积分、卡尔曼滤波预测、点云运动畸变校正
     p_imu_->Process(measures_, kf_, scan_undistort_);
 
+    // 检查去畸变后的点云是否有效
     if (scan_undistort_->empty() || (scan_undistort_ == nullptr)) {
         LOG(WARNING) << "No point, skip this scan!";
         return false;
     }
 
-    /// the first scan
+    /// 处理第一帧激光扫描（系统初始化）
     if (flg_first_scan_) {
         LOG(INFO) << "first scan pts: " << scan_undistort_->size();
 
+        // 获取当前状态估计
         state_point_ = kf_.GetX();
+        
+        // 将第一帧点云从雷达坐标系转换到世界坐标系
         scan_down_world_->resize(scan_undistort_->size());
         for (int i = 0; i < scan_undistort_->size(); i++) {
             PointBodyToWorld(scan_undistort_->points[i], scan_down_world_->points[i]);
         }
+        
+        // 将第一帧点云添加到iVox增量地图中，作为初始地图
         ivox_->AddPoints(scan_down_world_->points);
 
+        // 记录第一帧激光雷达时间戳
         first_lidar_time_ = measures_.lidar_end_time_;
         state_point_.timestamp_ = lidar_end_time_;
+        
+        // 标记第一帧已处理完成
         flg_first_scan_ = false;
         return true;
     }
 
+    // 如果启用了跳帧处理（用于降低计算负载）
     if (enable_skip_lidar_) {
         skip_lidar_cnt_++;
         skip_lidar_cnt_ = skip_lidar_cnt_ % skip_lidar_num_;
 
+        // 如果当前帧需要跳过（不是每skip_lidar_num_帧处理一次）
         if (skip_lidar_cnt_ != 0) {
-            /// 更新UI中的内容
+            /// 更新UI中的内容，保持可视化实时性
             if (ui_) {
                 ui_->UpdateNavState(kf_.GetX());
                 ui_->UpdateScan(scan_undistort_, kf_.GetX().GetPose());
@@ -194,38 +268,52 @@ bool LaserMapping::Run() {
     // LOG(INFO) << "LIO get cloud at beg: " << std::setprecision(14) << measures_.lidar_begin_time_
     //           << ", end: " << measures_.lidar_end_time_;
 
+    // 检测激光雷达数据断流（时间间隔超过0.5秒）
     if (last_lidar_time_ > 0 && (measures_.lidar_begin_time_ - last_lidar_time_) > 0.5) {
         LOG(ERROR) << "检测到雷达断流，时长：" << (measures_.lidar_begin_time_ - last_lidar_time_);
     }
 
+    // 更新上一次激光雷达时间戳
     last_lidar_time_ = measures_.lidar_begin_time_;
 
+    // 判断EKF是否已经完成初始化（需要运行足够长时间以收敛）
     flg_EKF_inited_ = (measures_.lidar_begin_time_ - first_lidar_time_) >= fasterlio::INIT_TIME;
 
-    /// downsample
+    /// 点云降采样（体素滤波），减少计算量
     voxel_scan_.setInputCloud(scan_undistort_);
     voxel_scan_.filter(*scan_down_body_);
 
+    // 获取降采样后的点数
     int cur_pts = scan_down_body_->size();
+    
+    // 如果点数太少（少于5个点），跳过本帧
     if (cur_pts < 5) {
         LOG(WARNING) << "Too few points, skip this scan!" << scan_undistort_->size() << ", " << scan_down_body_->size();
         return false;
     }
+    
+    // 预分配内存，存储世界坐标系下的点云和最近邻点
     scan_down_world_->resize(cur_pts);
     nearest_points_.resize(cur_pts);
 
+    // 执行IEKF（迭代扩展卡尔曼滤波）求解和状态更新
     Timer::Evaluate(
         [&, this]() {
-            // 成员变量预分配
-            residuals_.resize(cur_pts, 0);
-            point_selected_surf_.resize(cur_pts, true);
-            plane_coef_.resize(cur_pts, Vec4f::Zero());
+            // 预分配成员变量内存，提高效率
+            residuals_.resize(cur_pts, 0);                          // 每个点的残差
+            point_selected_surf_.resize(cur_pts, true);             // 每个点是否被选为有效特征点
+            plane_coef_.resize(cur_pts, Vec4f::Zero());             // 每个点对应的平面系数 [nx, ny, nz, d]
 
+            // 保存更新前的状态，用于后续判断是否需要回退
             auto old_state = kf_.GetX();
 
+            // 执行IEKF更新：使用激光雷达观测数据进行迭代优化
+            // 1e-3是收敛阈值，用于判断迭代是否收敛
             kf_.Update(ESKF::ObsType::LIDAR, 1e-3);
             state_point_ = kf_.GetX();
 
+            // 如果启用了保持初始IMU估计，并且关键帧数量较少，检查旋转变化是否过大
+            // 如果旋转变化超过0.3度，认为更新不可靠，回退到预测状态
             if (keep_first_imu_estimation_ && all_keyframes_.size() < 5 &&
                 (old_state.rot_.inverse() * state_point_.rot_).log().norm() > 0.3 * M_PI / 180) {
                 kf_.ChangeX(old_state);
@@ -236,74 +324,117 @@ bool LaserMapping::Run() {
 
             // LOG(INFO) << "old yaw: " << old_state.rot_.angleZ() << ", new: " << state_point_.rot_.angleZ();
 
+            // 设置状态时间戳为激光雷达结束时间
             state_point_.timestamp_ = measures_.lidar_end_time_;
+            
+            // 更新当前欧拉角（旋转）
             euler_cur_ = state_point_.rot_;
+            
+            // 计算激光雷达在世界坐标系下的位置：机体位置 + 旋转 * 外参平移
             pos_lidar_ = state_point_.pos_ + state_point_.rot_ * state_point_.offset_t_lidar_;
         },
         "IEKF Solve and Update");
 
-    // update local map
+    // 更新局部地图：将当前帧点云增量式地加入到iVox地图中
     Timer::Evaluate([&, this]() { MapIncremental(); }, "    Incremental Mapping");
 
+    // 输出建图统计信息：输入点数、降采样后点数、地图网格数、有效特征点数
     LOG(INFO) << "[ mapping ]: In num: " << scan_undistort_->points.size() << " down " << cur_pts
               << " Map grid num: " << ivox_->NumValidGrids() << " effect num : " << effect_feat_num_;
 
-    /// keyframes
+    /// 关键帧生成判断
     if (last_kf_ == nullptr) {
+        // 如果还没有关键帧，创建第一个关键帧
         MakeKF();
     } else {
+        // 获取上一个关键帧和当前帧的位姿
         SE3 last_pose = last_kf_->GetLIOPose();
         SE3 cur_pose = state_point_.GetPose();
+        
+        // 判断是否满足生成新关键帧的条件：
+        // 1. 平移距离超过阈值 kf_dis_th_
+        // 2. 旋转角度超过阈值 kf_angle_th_
         if ((last_pose.translation() - cur_pose.translation()).norm() > options_.kf_dis_th_ ||
             (last_pose.so3().inverse() * cur_pose.so3()).log().norm() > options_.kf_angle_th_) {
             MakeKF();
-        } else if (!options_.is_in_slam_mode_ && (state_point_.timestamp_ - last_kf_->GetState().timestamp_) > 2.0) {
+        } 
+        // 在定位模式下，如果时间间隔超过2秒也生成关键帧
+        else if (!options_.is_in_slam_mode_ && (state_point_.timestamp_ - last_kf_->GetState().timestamp_) > 2.0) {
             MakeKF();
         }
     }
 
-    /// 更新kf_for_imu
+    /// 更新高频IMU状态估计器（kf_imu_），用于IMU数据到来时的高频状态预测
     kf_imu_ = kf_;
+    
+    // 如果有新的IMU数据，将缓冲区中的IMU数据向前传播
     if (!measures_.imu_.empty()) {
+        // 从当前测量包中最后一个IMU时间戳开始
         double t = measures_.imu_.back()->timestamp;
+        
+        // 遍历IMU缓冲区中的所有数据，逐步预测状态
         for (auto &imu : imu_buffer_) {
             double dt = imu->timestamp - t;
+            // 使用IMU数据进行卡尔曼滤波预测
             kf_imu_.Predict(dt, p_imu_->Q_, imu->angular_velocity, imu->linear_acceleration);
             t = imu->timestamp;
         }
     }
 
+    // 如果启用了可视化，更新显示当前扫描结果
     if (ui_) {
         ui_->UpdateScan(scan_undistort_, state_point_.GetPose());
     }
 
+    // 处理成功
     return true;
 }
 
+/**
+ * [功能描述]：创建新的关键帧并更新位姿
+ * @return 无返回值
+ * 
+ * 主要功能：
+ * 1. 创建包含当前点云和状态的关键帧
+ * 2. 计算并设置优化位姿（基于上一关键帧的位姿递推）
+ * 3. 在SLAM模式下将关键帧加入全局列表
+ * 4. 更新最后一个关键帧的引用
+ */
 void LaserMapping::MakeKF() {
+    // 创建新的关键帧对象，包含关键帧ID、去畸变点云和当前状态估计
     Keyframe::Ptr kf = std::make_shared<Keyframe>(kf_id_++, scan_undistort_, state_point_);
 
+    // 如果存在上一个关键帧，计算位姿增量并传播优化位姿
     if (last_kf_) {
         // LOG(INFO) << "last kf lio: " << last_kf_->GetLIOPose().translation().transpose()
         //           << ", opt: " << last_kf_->GetOptPose().translation().transpose();
 
-        /// opt pose 用之前的递推
+        /// 计算相对位姿变换（从上一关键帧的LIO位姿到当前关键帧的LIO位姿的增量）
         SE3 delta = last_kf_->GetLIOPose().inverse() * kf->GetLIOPose();
+        
+        // 将位姿增量应用到上一关键帧的优化位姿上，得到当前关键帧的优化位姿初值
+        // 优化位姿会在后续的回环检测和位姿图优化中被进一步调整
         kf->SetOptPose(last_kf_->GetOptPose() * delta);
     } else {
+        // 如果是第一个关键帧，将优化位姿直接设置为LIO位姿
         kf->SetOptPose(kf->GetLIOPose());
     }
 
+    // 设置关键帧的完整状态信息（包括位置、速度、旋转、IMU偏差等）
     kf->SetState(state_point_);
 
+    // 记录关键帧创建日志，输出ID、状态位置、优化位姿、LIO位姿等信息
     LOG(INFO) << "LIO: create kf " << kf->GetID() << ", state: " << state_point_.pos_.transpose()
               << ", kf opt pose: " << kf->GetOptPose().translation().transpose()
               << ", lio pose: " << kf->GetLIOPose().translation().transpose();
 
+    // 如果处于SLAM建图模式，将关键帧加入全局关键帧列表
+    // （定位模式下不需要保存所有关键帧）
     if (options_.is_in_slam_mode_) {
         all_keyframes_.emplace_back(kf);
     }
 
+    // 更新最后一个关键帧的引用，供下次创建关键帧时使用
     last_kf_ = kf;
 }
 
