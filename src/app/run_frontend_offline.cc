@@ -9,7 +9,6 @@
 #include "core/lio/laser_mapping.h"
 #include "ui/pangolin_window.h"
 #include "wrapper/bag_io.h"
-#include "wrapper/ros_utils.h"
 
 #include <opencv2/opencv.hpp>
 

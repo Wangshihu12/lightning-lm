@@ -1,5 +1,4 @@
 #include <pcl/common/transforms.h>
-#include <pcl_conversions/pcl_conversions.h>
 
 #include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/localization.h"
@@ -88,9 +87,9 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
 
         loc_result_ = res;
 
-        if (tf_callback_ && loc_result_.valid_) {
-            tf_callback_(loc_result_.ToGeoMsg());
-        }
+        // if (tf_callback_ && loc_result_.valid_) {
+        //     tf_callback_(loc_result_.ToGeoMsg());
+        // }
 
         if (ui_) {
             ui_->UpdateNavState(loc_result_.ToNavState());
@@ -123,7 +122,25 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
     return true;
 }
 
-void Localization::ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+// void Localization::ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+//     UL lock(global_mutex_);
+//     if (lidar_loc_ == nullptr || lio_ == nullptr || pgo_ == nullptr) {
+//         return;
+//     }
+
+//     // 串行模式
+//     CloudPtr laser_cloud(new PointCloudType);
+//     preprocess_->Process(cloud, laser_cloud);
+//     laser_cloud->header.stamp = cloud->header.stamp.sec * 1e9 + cloud->header.stamp.nanosec;
+
+//     if (options_.online_mode_) {
+//         lidar_odom_proc_cloud_.AddMessage(laser_cloud);
+//     } else {
+//         LidarOdomProcCloud(laser_cloud);
+//     }
+// }
+
+void Localization::ProcessLivoxLidarMsg(const msgs::CustomMsg::ConstPtr cloud) {
     UL lock(global_mutex_);
     if (lidar_loc_ == nullptr || lio_ == nullptr || pgo_ == nullptr) {
         return;
@@ -132,25 +149,7 @@ void Localization::ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPt
     // 串行模式
     CloudPtr laser_cloud(new PointCloudType);
     preprocess_->Process(cloud, laser_cloud);
-    laser_cloud->header.stamp = cloud->header.stamp.sec * 1e9 + cloud->header.stamp.nanosec;
-
-    if (options_.online_mode_) {
-        lidar_odom_proc_cloud_.AddMessage(laser_cloud);
-    } else {
-        LidarOdomProcCloud(laser_cloud);
-    }
-}
-
-void Localization::ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
-    UL lock(global_mutex_);
-    if (lidar_loc_ == nullptr || lio_ == nullptr || pgo_ == nullptr) {
-        return;
-    }
-
-    // 串行模式
-    CloudPtr laser_cloud(new PointCloudType);
-    preprocess_->Process(cloud, laser_cloud);
-    laser_cloud->header.stamp = cloud->header.stamp.sec * 1e9 + cloud->header.stamp.nanosec;
+    laser_cloud->header.stamp = cloud->header.stamp.sec * 1e9 + cloud->header.stamp.nsec;
 
     if (options_.online_mode_) {
         lidar_odom_proc_cloud_.AddMessage(laser_cloud);
@@ -212,12 +211,12 @@ void Localization::LidarLocProcCloud(CloudPtr scan_undist) {
         ui_->UpdateScan(scan_undist, res.pose_);
     }
 
-    if (loc_state_callback_) {
-        auto loc_state = std::make_shared<std_msgs::msg::Int32>();
-        loc_state->data = static_cast<int>(res.status_);
-        LOG(INFO) << "loc_state: " << loc_state->data;
-        loc_state_callback_(*loc_state);
-    }
+    // if (loc_state_callback_) {
+    //     auto loc_state = std::make_shared<std_msgs::msg::Int32>();
+    //     loc_state->data = static_cast<int>(res.status_);
+    //     LOG(INFO) << "loc_state: " << loc_state->data;
+    //     loc_state_callback_(*loc_state);
+    // }
 }
 
 void Localization::ProcessIMUMsg(IMUPtr imu) {
@@ -312,6 +311,6 @@ void Localization::SetExternalPose(const Eigen::Quaterniond& q, const Eigen::Vec
     }
 }
 
-void Localization::SetTFCallback(Localization::TFCallback&& callback) { tf_callback_ = callback; }
+// void Localization::SetTFCallback(Localization::TFCallback&& callback) { tf_callback_ = callback; }
 
 }  // namespace lightning::loc

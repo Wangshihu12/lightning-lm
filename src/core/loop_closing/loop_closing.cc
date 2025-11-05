@@ -287,7 +287,7 @@ void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
      * 
      * 子地图通过融合中心关键帧周围多个关键帧的点云构建，提供更丰富的几何信息用于配准
      */
-    auto build_submap = [this](int given_id, bool build_in_world) -> CloudPtr {
+    auto build_submap = [this, submap_idx_range](int given_id, bool build_in_world) -> CloudPtr {
         // 创建空的子地图点云
         CloudPtr submap(new PointCloudType);
         
@@ -373,8 +373,8 @@ void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
         ndt.setResolution(r);
         
         // 对子地图进行体素降采样，降采样尺寸为分辨率的0.1倍
-        rough_map1 = VoxelGrid(submap_kf1, r * 0.1);
-        rough_map2 = VoxelGrid(submap_kf2, r * 0.1);
+        rough_map1 = lightning::VoxelGrid(submap_kf1, static_cast<float>(r * 0.1));
+        rough_map2 = lightning::VoxelGrid(submap_kf2, static_cast<float>(r * 0.1));
         
         // 设置目标点云（历史关键帧子地图）
         ndt.setInputTarget(rough_map1);

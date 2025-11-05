@@ -11,8 +11,6 @@
 #include <common/constant.h>
 #include <common/eigen_types.h>
 
-#include <rclcpp/rclcpp.hpp>
-
 /// 配置参数
 namespace lightning {
 
@@ -26,7 +24,7 @@ extern float play_speed;  // 播放速度
 
 inline void SigHandle(int sig) {
     debug::flg_exit = true;
-    rclcpp::shutdown();
+    // rclcpp::shutdown();
 }
 
 }  // namespace debug
@@ -57,7 +55,7 @@ constexpr int PGO_MAX_FRAMES = 5;                               // PGO所持的�
 constexpr int PGO_MAX_SIZE_OF_RELATIVE_POSE_QUEUE = 10000;      // PGO 相对定位队列最大长度
 constexpr int PGO_MAX_SIZE_OF_RTK_POSE_QUEUE = 200;             // PGO RTK观测队列最大长度
 constexpr double PGO_DISTANCE_TH_LAST_FRAMES = 2.5;             // PGO 滑窗时，最近两帧的最小距离
-constexpr double PGO_ANGLE_TH_LAST_FRAMES = 10 * M_PI / 360.0;  // PGO 滑窗时，最近两帧的最小角度
+constexpr double PGO_ANGLE_TH_LAST_FRAMES = 10 * 3.14159265358979323846 / 360.0;  // PGO 滑窗时，最近两帧的最小角度
 
 /// 噪声参数
 /// 宁松勿紧避矛盾

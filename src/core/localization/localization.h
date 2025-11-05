@@ -1,8 +1,5 @@
 #pragma once
 
-#include "geometry_msgs/msg/transform_stamped.hpp"
-#include "std_msgs/msg/int32.hpp"
-
 #include "common/imu.h"
 #include "core/lio/laser_mapping.h"
 #include "core/localization/localization_result.h"
@@ -52,8 +49,8 @@ class Localization {
     bool Init(const std::string& yaml_path, const std::string& global_map_path);
 
     /// 处理lidar消息
-    void ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPtr laser_msg);
-    void ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg::SharedPtr laser_msg);
+    // void ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPtr laser_msg);
+    void ProcessLivoxLidarMsg(const msgs::CustomMsg::ConstPtr laser_msg);
 
     /// 处理IMU消息
     void ProcessIMUMsg(IMUPtr imu);
@@ -74,12 +71,12 @@ class Localization {
     void LidarOdomProcCloud(CloudPtr);
     void LidarLocProcCloud(CloudPtr);
 
-    using TFCallback = std::function<void(const geometry_msgs::msg::TransformStamped& odom)>;
-    using LocStateCallback = std::function<void(const std_msgs::msg::Int32& state)>;
-    using PointcloudBodyCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
-    using PointcloudWorldCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
+    // using TFCallback = std::function<void(const geometry_msgs::msg::TransformStamped& odom)>;
+    // using LocStateCallback = std::function<void(const std_msgs::msg::Int32& state)>;
+    // using PointcloudBodyCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
+    // using PointcloudWorldCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
 
-    void SetTFCallback(TFCallback&& callback);
+    // void SetTFCallback(TFCallback&& callback);
 
     // void SetPathCallback(std::function<void(const nav_msgs::msg::Path& path)>&& callback);
     // void SetPointcloudWorldCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
@@ -116,10 +113,10 @@ class Localization {
     LocalizationResult loc_result_;
 
     /// 框架相关
-    TFCallback tf_callback_;
-    LocStateCallback loc_state_callback_;
-    PointcloudBodyCallback pointcloud_body_callback_;
-    PointcloudWorldCallback pointcloud_world_callback_;
+    // TFCallback tf_callback_;
+    // LocStateCallback loc_state_callback_;
+    // PointcloudBodyCallback pointcloud_body_callback_;
+    // PointcloudWorldCallback pointcloud_world_callback_;
 
     /// 输入检查
     double last_imu_time_ = 0;

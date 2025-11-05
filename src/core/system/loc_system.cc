@@ -5,7 +5,6 @@
 #include "core/system/loc_system.h"
 #include "core/localization/localization.h"
 #include "io/yaml_io.h"
-#include "wrapper/ros_utils.h"
 
 namespace lightning {
 
@@ -85,13 +84,13 @@ void LocSystem::ProcessIMU(const IMUPtr &imu) {
     }
 }
 
-void LocSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr &cloud) {
-    if (loc_started_) {
-        loc_->ProcessLidarMsg(cloud);
-    }
-}
+// void LocSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr &cloud) {
+//     if (loc_started_) {
+//         loc_->ProcessLidarMsg(cloud);
+//     }
+// }
 
-void LocSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr &cloud) {
+void LocSystem::ProcessLidar(const msgs::CustomMsg::ConstPtr &cloud) {
     if (loc_started_) {
         loc_->ProcessLivoxLidarMsg(cloud);
     }

@@ -7,7 +7,6 @@
 
 #include "core/system/loc_system.h"
 #include "ui/pangolin_window.h"
-#include "wrapper/ros_utils.h"
 
 DEFINE_string(config, "./config/default.yaml", "配置文件");
 

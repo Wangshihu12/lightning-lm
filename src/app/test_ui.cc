@@ -8,11 +8,13 @@
 #include <pangolin/display/view.h>
 #include <pangolin/gl/gldraw.h>
 #include <pangolin/handler/handler.h>
+#include <chrono>
+#include <thread>
 
 int main(int argc, char** argv) {
     google::InitGoogleLogging(argv[0]);
     FLAGS_colorlogtostderr = true;
-    FLAGS_stderrthreshold = google::INFO;
+    FLAGS_stderrthreshold = google::GLOG_INFO;
 
     google::ParseCommandLineFlags(&argc, &argv, true);
 
@@ -20,7 +22,7 @@ int main(int argc, char** argv) {
     ui.Init();
 
     while (!ui.ShouldQuit()) {
-        sleep(1);
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
     ui.Quit();

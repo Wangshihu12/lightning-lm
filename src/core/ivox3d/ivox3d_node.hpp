@@ -92,7 +92,7 @@ struct IVoxNode<PointT, dim>::DistPoint {
 
 template <typename PointT, int dim>
 void IVoxNode<PointT, dim>::InsertPoint(const PointT& pt) {
-    points_.template emplace_back(pt);
+    points_.emplace_back(pt);
     if (points_.size() >= 10) {
         points_.erase(points_.begin());
     }
@@ -136,7 +136,7 @@ int IVoxNode<PointT, dim>::KNNPointByCondition(std::vector<DistPoint>& dis_point
         auto t1 = std::chrono::high_resolution_clock::now();
 #endif
         if (d < max_range * max_range) {
-            dis_points.template emplace_back(DistPoint(d, this, &pt - points_.data()));
+            dis_points.emplace_back(DistPoint(d, this, &pt - points_.data()));
         }
 #ifdef INNER_TIMER
         auto t2 = std::chrono::high_resolution_clock::now();

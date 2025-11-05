@@ -9,7 +9,6 @@
 #include "core/loop_closing/loop_closing.h"
 #include "ui/pangolin_window.h"
 #include "wrapper/bag_io.h"
-#include "wrapper/ros_utils.h"
 
 DEFINE_string(input_bag, "", "输入数据包");
 DEFINE_string(config, "./config/default.yaml", "配置文件");

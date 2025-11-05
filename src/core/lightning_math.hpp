@@ -14,14 +14,12 @@
 #include <cmath>
 #include <numeric>
 
-#include <tf2/LinearMath/Matrix3x3.h>
-#include <tf2/LinearMath/Quaternion.h>
-#include <rclcpp/time.hpp>
-
 #include "common/eigen_types.h"
 #include "common/options.h"
 #include "common/point_def.h"
 #include "common/pose_rpy.h"
+
+#include "msgs/custom_msg.hpp"
 
 namespace lightning::math {
 
@@ -543,8 +541,8 @@ void UpdateMeanAndCov(int hist_m, int curr_n, const Eigen::Matrix<S, D, 1>& hist
     assert(hist_m > 0);
     assert(curr_n > 0);
     new_mean = (hist_m * hist_mean + curr_n * curr_mean) / (hist_m + curr_n);
-    new_var = (hist_m * (hist_var + (hist_mean - new_mean) * (hist_mean - new_mean).template transpose()) +
-               curr_n * (curr_var + (curr_mean - new_mean) * (curr_mean - new_mean).template transpose())) /
+    new_var = (hist_m * (hist_var + (hist_mean - new_mean) * (hist_mean - new_mean).transpose()) +
+               curr_n * (curr_var + (curr_mean - new_mean) * (curr_mean - new_mean).transpose())) /
               (hist_m + curr_n);
 }
 
@@ -567,10 +565,10 @@ inline void KeepAngleIn2PI(double& angle) {
     }
 }
 
-inline builtin_interfaces::msg::Time FromSec(double t) {
-    builtin_interfaces::msg::Time ret;
+inline msgs::Time FromSec(double t) {
+    msgs::Time ret;
     ret.sec = int32_t(t);
-    ret.nanosec = int32_t((t - ret.sec) * 1e9);
+    ret.nsec = int32_t((t - ret.sec) * 1e9);
     return ret;
 }
 
@@ -581,15 +579,16 @@ inline builtin_interfaces::msg::Time FromSec(double t) {
 /// 这个用在lego-loam的lidar odom里，符合它的定义
 /// 2020.11 change back to tf to keep consist
 inline PoseRPYD SE3ToRollPitchYaw(const SE3& pose) {
-    auto rot = pose.rotationMatrix();
-    tf2::Matrix3x3 temp_tf_matrix(rot(0, 0), rot(0, 1), rot(0, 2), rot(1, 0), rot(1, 1), rot(1, 2), rot(2, 0),
-                                  rot(2, 1), rot(2, 2));
     PoseRPYD output;
-    output.x = pose.translation()[0];
-    output.y = pose.translation()[1];
-    output.z = pose.translation()[2];
+    output.x = pose.translation().x();
+    output.y = pose.translation().y();
+    output.z = pose.translation().z();
 
-    temp_tf_matrix.getRPY(output.roll, output.pitch, output.yaw);
+    // Eigen 默认返回弧度；(0,1,2) 表示 X-Y-Z (roll-pitch-yaw) 顺序
+    const Eigen::Vector3d rpy = pose.rotationMatrix().eulerAngles(0, 1, 2);
+    output.roll  = rpy.x();
+    output.pitch = rpy.y();
+    output.yaw   = rpy.z();
     return output;
 }
 

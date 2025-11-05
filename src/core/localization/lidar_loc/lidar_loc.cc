@@ -6,6 +6,7 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/pcl_base.h>
 #include <pcl/registration/ndt.h>
+#include <chrono>
 
 #include "pclomp/ndt_omp_impl.hpp"
 #include "pclomp/voxel_grid_covariance_omp_impl.hpp"
@@ -414,7 +415,7 @@ void LidarLoc::UpdateMapThread() {
 
             map_->CleanMapUpdate();
         }
-        usleep(10000);
+        std::this_thread::sleep_for(std::chrono::microseconds(10000));
     }
 }
 

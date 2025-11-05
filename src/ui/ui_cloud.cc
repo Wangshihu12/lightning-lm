@@ -1,6 +1,9 @@
 #include "ui/ui_cloud.h"
 #include "common/options.h"
 
+#ifdef _WIN32
+#include <Windows.h>
+#endif
 #include <GL/gl.h>
 #include <numeric>
 

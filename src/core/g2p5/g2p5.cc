@@ -11,6 +11,7 @@
 #include <map>
 #include <pcl/filters/impl/voxel_grid.hpp>
 #include <pcl/segmentation/impl/sac_segmentation.hpp>
+#include <chrono>
 
 #include "utils/timer.h"
 #include "yaml-cpp/yaml.h"
@@ -66,7 +67,7 @@ void G2P5::RedrawGlobalMap() { backend_redraw_flag_ = true; }
 void G2P5::RenderBack() {
     while (!quit_flag_) {
         while (!backend_redraw_flag_ && !quit_flag_) {
-            sleep(1);
+            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
         if (quit_flag_) {

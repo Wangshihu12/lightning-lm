@@ -1,4 +1,9 @@
-add_library(${PROJECT_NAME}.libs SHARED
+set(lightning_lib_type SHARED)
+if (MSVC)
+    set(lightning_lib_type STATIC)
+endif()
+
+add_library(${PROJECT_NAME}.libs ${lightning_lib_type}
         common/nav_state.cc
         common/constant.h
         common/options.cc
@@ -39,28 +44,9 @@ add_library(${PROJECT_NAME}.libs SHARED
         ui/ui_trajectory.cc
 
         core/system/slam.cc
-        core/system/loc_system.cc
+        # core/system/loc_system.cc
 
         wrapper/bag_io.cc
-)
-
-ament_target_dependencies(
-        ${PROJECT_NAME}.libs
-        "rclcpp"
-        "std_msgs"
-        "geometry_msgs"
-        "sensor_msgs"
-        "nav_msgs"
-        "std_srvs"
-        "message_filters"
-        "pcl_conversions"
-        "tf2_ros"
-        "tf2"
-)
-
-add_dependencies(${PROJECT_NAME}.libs
-        livox_interfaces2__rosidl_typesupport_cpp
-        ${PROJECT_NAME}__rosidl_typesupport_cpp
 )
 
 include_directories(${PROJECT_SOURCE_DIR}/src/core/miao)
@@ -69,13 +55,11 @@ add_subdirectory(core/miao)
 target_link_libraries(${PROJECT_NAME}.libs
         ${third_party_libs}
         ${PCL_LIBRARIES}
-        miao.core
-        miao.utils
-        livox_interfaces2__rosidl_typesupport_cpp
-        ${PROJECT_NAME}__rosidl_typesupport_cpp
+        miao_core
+        miao_utils
 )
 
-install(TARGETS ${PROJECT_NAME}.libs miao.core miao.utils
+install(TARGETS ${PROJECT_NAME}.libs miao_core miao_utils
         DESTINATION lib)
 
 add_subdirectory(app)

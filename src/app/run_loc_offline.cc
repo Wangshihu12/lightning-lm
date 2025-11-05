@@ -9,7 +9,6 @@
 #include "ui/pangolin_window.h"
 #include "utils/timer.h"
 #include "wrapper/bag_io.h"
-#include "wrapper/ros_utils.h"
 
 #include "io/yaml_io.h"
 

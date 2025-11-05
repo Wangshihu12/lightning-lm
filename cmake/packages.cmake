@@ -1,22 +1,70 @@
-find_package(glog REQUIRED)
+find_package(glog CONFIG REQUIRED)
+find_package(gflags CONFIG REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(yaml-cpp REQUIRED)
-find_package(glog REQUIRED)
 find_package(Pangolin REQUIRED)
 find_package(OpenGL REQUIRED)
-find_package(pcl_conversions REQUIRED)
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(std_srvs REQUIRED)
 find_package(OpenCV REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(rosbag2_cpp REQUIRED)
+find_package(TBB CONFIG REQUIRED)
+
+# vcpkg toolchain 外部传入：-DCMAKE_TOOLCHAIN_FILE=...
+find_package(ZLIB REQUIRED)
+find_package(BZip2 REQUIRED)
+find_package(lz4 REQUIRED)
+find_package(Boost REQUIRED COMPONENTS filesystem system)
+
+# 先做四个核心组件
+add_subdirectory(external/roscpp_core/cpp_common)
+add_subdirectory(external/roscpp_core/roscpp_serialization)
+add_subdirectory(external/roscpp_core/rostime)
+
+# 这两个基本为 header-only — 我们给它们定义 INTERFACE 目标，方便依赖
+add_library(roscpp_traits INTERFACE)
+target_include_directories(roscpp_traits INTERFACE
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/roscpp_core/roscpp_traits/include)
+
+# add_library(roscpp_serialization INTERFACE)
+# target_include_directories(roscpp_serialization INTERFACE
+#   ${CMAKE_CURRENT_SOURCE_DIR}/external/roscpp_core/roscpp_serialization/include)
+# target_link_libraries(roscpp_serialization INTERFACE roscpp_traits)
+
+add_subdirectory(external/roslz4)
+
+# 编译 rosbag_storage（去掉 catkin，直接普通 CMake）
+# external/ros_comm/tools/rosbag_storage
+file(GLOB ROSBAG_STORAGE_SRC
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/ros_comm/tools/rosbag_storage/src/*.cpp)
+
+# 去掉需要 gpgme / 外部加密插件的实现文件
+list(REMOVE_ITEM ROSBAG_STORAGE_SRC
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/ros_comm/tools/rosbag_storage/src/aes_encryptor.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/ros_comm/tools/rosbag_storage/src/gpgme_utils.cpp
+)
+
+add_library(rosbag_storage STATIC ${ROSBAG_STORAGE_SRC})
+
+# 关闭 pluginlib / gpgme（非常关键！）
+target_compile_definitions(rosbag_storage PRIVATE
+  HAVE_PLUGINLIB=0
+  ROSBAG_NO_ENCRYPTION=1
+  ROSBAG_STORAGE_NO_GPGME=1
+  ROSBAG_STORAGE_NO_ENCRYPTION=1
+)
+
+target_include_directories(rosbag_storage PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/ros_comm/tools/rosbag_storage/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/roscpp_core/rostime/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/roscpp_core/cpp_common/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/roscpp_core/roscpp_traits/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/roscpp_core/roscpp_serialization/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/external/roslz4/include         # roslz4/lz4s.h 的头
+)
+
+target_link_libraries(rosbag_storage
+  PRIVATE Boost::filesystem Boost::system ZLIB::ZLIB BZip2::BZip2 lz4::lz4 roslz4
+  PUBLIC  rostime cpp_common roscpp_serialization
+)
 
 # OMP
 find_package(OpenMP)
@@ -41,19 +89,11 @@ include_directories(
         ${GLOG_INCLUDE_DIRS}
         ${Pangolin_INCLUDE_DIRS}
         ${GLEW_INCLUDE_DIRS}
-        ${tf2_INCLUDE_DIRS}
-        ${pcl_conversions_INCLUDR_DIRS}
-        ${rclcpp_INCLUDE_DIRS}
-        ${rosbag2_cpp_INCLUDE_DIRS}
-        ${nav_msgs_INCLUDE_DIRS}
-)
-
-include_directories(
-        ${CMAKE_CURRENT_BINARY_DIR}/thirdparty/livox_ros_driver/rosidl_generator_cpp
 )
 
 include_directories(
         ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/thirdparty
 )
 
@@ -62,10 +102,14 @@ set(third_party_libs
         ${PCL_LIBRARIES}
         ${OpenCV_LIBS}
         ${Pangolin_LIBRARIES}
-        glog gflags
+        glog::glog gflags::gflags
         ${yaml-cpp_LIBRARIES}
-        ${pcl_conversions_LIBRARIES}
-        tbb
-        ${rosbag2_cpp_LIBRARIES}
+        yaml-cpp::yaml-cpp
+        TBB::tbb
+        rosbag_storage
+        roscpp_serialization
+        rostime
+        cpp_common
+        ZLIB::ZLIB BZip2::BZip2 lz4::lz4
 )
 

@@ -5,12 +5,7 @@
 #ifndef LIGHTNING_LOC_SYSTEM_H
 #define LIGHTNING_LOC_SYSTEM_H
 
-#include <tf2_ros/transform_broadcaster.h>
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/imu.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-
-#include "livox_ros_driver2/msg/custom_msg.hpp"
+#include "msgs/custom_msg.hpp"
 
 #include "common/eigen_types.h"
 #include "common/imu.h"
@@ -41,8 +36,8 @@ class LocSystem {
     void ProcessIMU(const lightning::IMUPtr& imu);
 
     /// 处理点云
-    void ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud);
-    void ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr& cloud);
+    // void ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud);
+    void ProcessLidar(const msgs::CustomMsg::ConstPtr& cloud);
 
     /// 实时模式下的spin
     void Spin();

@@ -3,7 +3,6 @@
 
 #include <pcl/filters/voxel_grid.h>
 #include <condition_variable>
-#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <thread>
 
 #include "common/eigen_types.h"
@@ -15,7 +14,7 @@
 #include "core/lio/imu_processing.hpp"
 #include "pointcloud_preprocess.h"
 
-#include "livox_ros_driver2/msg/custom_msg.hpp"
+#include "msgs/custom_msg.hpp"
 
 namespace lightning {
 
@@ -59,10 +58,10 @@ class LaserMapping {
 
     // callbacks of lidar and imu
     /// 处理ROS2的点云
-    void ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr &msg);
+    // void ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr &msg);
 
     /// 处理livox的点云
-    void ProcessPointCloud2(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg);
+    void ProcessPointCloud2(const msgs::CustomMsg::ConstPtr &msg);
 
     /// 如果已经做了预处理，也可以直接处理点云
     void ProcessPointCloud2(CloudPtr cloud);

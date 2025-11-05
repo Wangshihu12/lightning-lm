@@ -8,7 +8,6 @@
 #include "core/system/slam.h"
 #include "utils/timer.h"
 #include "wrapper/bag_io.h"
-#include "wrapper/ros_utils.h"
 
 DEFINE_string(config, "./config/default.yaml", "配置文件");
 

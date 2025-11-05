@@ -1,4 +1,5 @@
-add_library(miao.core SHARED
+if (MSVC)
+add_library(miao_core STATIC
         graph/graph.cc
         graph/optimizer.cc
 
@@ -13,12 +14,30 @@ add_library(miao.core SHARED
 
         solver/solver.cc
 )
+else ()
+add_library(miao_core SHARED
+        graph/graph.cc
+        graph/optimizer.cc
 
-target_include_directories(miao.core PRIVATE
+        common/string_tools.cc
+
+        math/marginal_covariance_cholesky.cc
+
+        opti_algo/optimization_algorithm.cc
+        opti_algo/opti_algo_gauss_newton.cc
+        opti_algo/opti_algo_lm.cc
+        opti_algo/opti_algo_dogleg.cc
+
+        solver/solver.cc
+)
+endif ()
+
+target_include_directories(miao_core PRIVATE
         ${PROJECT_SOURCE_DIR}/src/core/miao
 )
 
 target_link_libraries(
-        miao.core
-        glog tbb
+        miao_core
+        glog::glog
+        TBB::tbb
 )
