@@ -96,8 +96,8 @@ class RosbagIO {
             IMUPtr imu = std::make_shared<IMU>();
             imu->timestamp = ToSec(msg->header.stamp);
             imu->linear_acceleration =
-                Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
-            imu->angular_velocity = Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+                Vec3d(msg->linear_acceleration.y, msg->linear_acceleration.x, msg->linear_acceleration.z);
+            imu->angular_velocity = Vec3d(msg->angular_velocity.y, msg->angular_velocity.x, msg->angular_velocity.z);
 
             return f(imu);
         });

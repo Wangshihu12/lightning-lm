@@ -14,7 +14,7 @@
 #include "io/yaml_io.h"
 
 DEFINE_string(input_bag, "", "输入数据包");
-DEFINE_string(config, "./config/default.yaml", "配置文件");
+DEFINE_string(config, "/home/wang/catkin_ws/catkin_lightning/src/lightning-lm/config/default.yaml", "配置文件");
 
 /// 运行一个LIO前端，带可视化
 int main(int argc, char** argv) {
