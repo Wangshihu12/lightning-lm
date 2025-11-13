@@ -251,102 +251,180 @@ void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
 }
 
 void LoopClosing::PoseOptimization() {
+    // 创建SE3位姿顶点，表示当前关键帧在位姿图中的节点
     auto v = std::make_shared<miao::VertexSE3>();
     v->SetId(cur_kf_->GetID());
     v->SetEstimate(cur_kf_->GetOptPose());
 
+    // 将顶点添加到优化器
     optimizer_->AddVertex(v);
+    
+    // 将顶点保存到列表中，用于后续结果提取
     kf_vert_.emplace_back(v);
 
-    /// 上一个关键帧的运动约束
-    /// TODO 3D激光最好是跟前面多个帧都有关联
+    /// 添加运动约束边：将当前关键帧与前面的关键帧连接
+    /// TODO 3D激光最好是跟前面多个帧都有关联，提高优化的稳定性
 
+    // 与前2个关键帧建立运动约束
     for (int i = 1; i < 3; i++) {
         int id = cur_kf_->GetID() - i;
+        
+        // 检查ID有效性
         if (id >= 0) {
             auto last_kf = all_keyframes_[id];
+            
+            // 创建SE3约束边
             auto e = std::make_shared<miao::EdgeSE3>();
+            
+            // 设置边的两个顶点：前一关键帧和当前关键帧
             e->SetVertex(0, optimizer_->GetVertex(last_kf->GetID()));
             e->SetVertex(1, v);
 
+            // 计算相对运动（从前一帧到当前帧的相对位姿变换）
+            // motion = T_last^(-1) * T_cur
             SE3 motion = last_kf->GetLIOPose().inverse() * cur_kf_->GetLIOPose();
+            
+            // 设置边的测量值（相对位姿）
             e->SetMeasurement(motion);
+            
+            // 设置信息矩阵（约束的权重），权重与运动噪声相关
             e->SetInformation(info_motion_);
+            
+            // 将运动约束边添加到优化器
             optimizer_->AddEdge(e);
         }
     }
 
-    if (options_.with_height_) {
-        /// 高度约束
-        auto e = std::make_shared<miao::EdgeHeightPrior>();
-        e->SetVertex(0, v);
-        e->SetMeasurement(0);
-        e->SetInformation(Mat1d::Identity() * 1.0 / (options_.height_noise_ * options_.height_noise_));
-        optimizer_->AddEdge(e);
-    }
-
-    /// 回环的约束
+    /// 添加回环约束边：将检测到的回环候选添加为约束
     for (auto& c : candidates_) {
+        // 创建回环约束边
         auto e = std::make_shared<miao::EdgeSE3>();
+        
+        // 设置边的两个顶点：历史关键帧和当前关键帧
         e->SetVertex(0, optimizer_->GetVertex(c.idx1_));
         e->SetVertex(1, optimizer_->GetVertex(c.idx2_));
+        
+        // 设置边的测量值（通过NDT配准得到的相对位姿）
         e->SetMeasurement(c.Tij_);
+        
+        // 设置信息矩阵（回环约束的权重），通常高于运动约束
         e->SetInformation(info_loops_);
 
+        // 设置鲁棒核函数（Cauchy核），用于抑制错误回环的影响
         auto rk = std::make_shared<miao::RobustKernelCauchy>();
-        rk->SetDelta(options_.rk_loop_th_);
+        rk->SetDelta(options_.rk_loop_th_);  // 设置核函数阈值
         e->SetRobustKernel(rk);
 
+        // 将回环约束边添加到优化器
         optimizer_->AddEdge(e);
+        
+        // 保存回环边，用于后续外点检测
         edge_loops_.emplace_back(e);
     }
 
+    // 如果没有边（约束），无法优化，直接返回
     if (optimizer_->GetEdges().empty()) {
         return;
     }
 
+    // 如果没有回环候选，跳过优化（仅有运动约束无需优化）
     if (candidates_.empty()) {
         return;
     }
 
+    // 备份所有顶点的初始估计，便于在剔除外点后回到干净初值
+    std::vector<SE3> vert_backup;
+    vert_backup.reserve(kf_vert_.size());
+    for (const auto& vert : kf_vert_) {
+        vert_backup.emplace_back(vert->Estimate());
+    }
+
+    // 初始化优化器，构建优化问题
     optimizer_->InitializeOptimization();
+    
+    // 关闭详细输出，避免过多日志
     optimizer_->SetVerbose(false);
 
+    // 执行图优化，迭代20次
     optimizer_->Optimize(20);
 
-    /// remove outliers
+    /// 移除外点（错误的回环约束）
     int cnt_outliers = 0;
+    bool has_inlier_loop = false;
+    
+    // 遍历所有回环边，检测外点
     for (auto& e : edge_loops_) {
+        // 跳过没有鲁棒核的边
         if (e->GetRobustKernel() == nullptr) {
             continue;
         }
 
+        // 检查边的卡方误差是否超过鲁棒核阈值
+        // Chi2误差大表示该约束与其他约束不一致，可能是错误的回环
         if (e->Chi2() > e->GetRobustKernel()->Delta()) {
+            // 设置边为level 1，在优化中被忽略
             e->SetLevel(1);
             cnt_outliers++;
         } else {
+            // 如果约束可靠，移除鲁棒核，使用原始的二次误差
             e->SetRobustKernel(nullptr);
+            has_inlier_loop = true;
         }
     }
 
-    if (options_.verbose_) {
-        LOG(INFO) << "loop outliers: " << cnt_outliers << "/" << edge_loops_.size();
+    // 如果存在外点或内点，则需要重新优化
+    const bool need_reopt = (cnt_outliers > 0) || has_inlier_loop;
+    if (need_reopt) {
+        // 恢复所有顶点的初始估计
+        for (size_t i = 0; i < kf_vert_.size() && i < vert_backup.size(); ++i) {
+            kf_vert_[i]->SetEstimate(vert_backup[i]);
+        }
+
+        // 切换到非增量模式
+        auto config = optimizer_->GetConfig();
+        const bool was_incremental = config.incremental_mode_;
+        if (was_incremental) {
+            config.incremental_mode_ = false;
+            optimizer_->SetConfig(config);
+        }
+
+        optimizer_->SetVerbose(false);
+        optimizer_->InitializeOptimization();
+        optimizer_->Optimize(20);
+
+        // 恢复增量模式
+        if (was_incremental) {
+            config.incremental_mode_ = true;
+            optimizer_->SetConfig(config);
+        }
     }
 
-    /// get results
+    // 输出外点统计信息
+    if (options_.verbose_) {
+        LOG(INFO) << "回环外点数量: " << cnt_outliers << "/" << edge_loops_.size();
+    }
+
+    /// 从优化器中提取优化结果，更新所有关键帧的位姿
     for (auto& vert : kf_vert_) {
+        // 获取优化后的位姿
         SE3 pose = vert->Estimate();
+        
+        // 更新对应关键帧的优化位姿
         all_keyframes_[vert->GetId()]->SetOptPose(pose);
     }
 
+    // 如果设置了回环闭合回调函数，触发回调
+    // 回调函数通常用于重绘全局地图或更新可视化
     if (loop_cb_) {
         loop_cb_();
     }
 
-    LOG(INFO) << "optimize finished, loops: " << edge_loops_.size();
+    // 输出优化完成信息，显示回环约束数量
+    LOG(INFO) << "位姿图优化完成, 回环约束数量: " << edge_loops_.size();
 
+    // 可选：输出当前关键帧的优化位姿和LIO位姿对比，用于调试
     // LOG(INFO) << "lc: cur kf " << cur_kf_->GetID() << ", opt: " << cur_kf_->GetOptPose().translation().transpose()
-    //           << ", lio: " << cur_kf_->GetLIOPose().translation().transpose();
+//           << ", lio: " << cur_kf_->GetLIOPose().translation().transpose();
 }
 
 }  // namespace lightning
