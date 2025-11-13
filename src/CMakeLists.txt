@@ -44,38 +44,25 @@ add_library(${PROJECT_NAME}.libs SHARED
         wrapper/bag_io.cc
 )
 
-ament_target_dependencies(
-        ${PROJECT_NAME}.libs
-        "rclcpp"
-        "std_msgs"
-        "geometry_msgs"
-        "sensor_msgs"
-        "nav_msgs"
-        "std_srvs"
-        "message_filters"
-        "pcl_conversions"
-        "tf2_ros"
-        "tf2"
-)
-
-add_dependencies(${PROJECT_NAME}.libs
-        livox_interfaces2__rosidl_typesupport_cpp
-        ${PROJECT_NAME}__rosidl_typesupport_cpp
-)
-
 include_directories(${PROJECT_SOURCE_DIR}/src/core/miao)
 add_subdirectory(core/miao)
 
+add_dependencies(${PROJECT_NAME}.libs
+        ${${PROJECT_NAME}_EXPORTED_TARGETS}
+        ${catkin_EXPORTED_TARGETS}
+)
+
 target_link_libraries(${PROJECT_NAME}.libs
+        ${catkin_LIBRARIES}
         ${third_party_libs}
         ${PCL_LIBRARIES}
         miao.core
         miao.utils
-        livox_interfaces2__rosidl_typesupport_cpp
-        ${PROJECT_NAME}__rosidl_typesupport_cpp
 )
 
 install(TARGETS ${PROJECT_NAME}.libs miao.core miao.utils
-        DESTINATION lib)
+        ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+        LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+        RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
 add_subdirectory(app)

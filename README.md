@@ -68,28 +68,37 @@ Features of Lightning-LM:
 
 ### Environment
 
-Ubuntu 22.04 or higher.
-
-Ubuntu 20.04 should also work, but not tested.
+- Ubuntu 20.04 with ROS Noetic (desktop-full) is the primary target.
+- Ubuntu 22.04 can also be used if Noetic is installed via Docker or third-party packages.
 
 ### Dependencies
 
-- ros2 humble or above
+- ROS Noetic (roscpp, tf2_ros, tf2, rosbag, pcl_ros, pcl_conversions, catkin)
 - Pangolin (for visualization, see thirdparty)
 - OpenCV
 - PCL
 - yaml-cpp
 - glog
 - gflags
-- pcl_conversions
 
-On Ubuntu 22.04, run: ```bash ./scripts/install_dep.sh```.
+On Ubuntu 20.04/Noetic you can install the system packages with:
+
+```bash
+./scripts/install_dep.sh
+```
 
 ### Build
 
-Build this package with ```colcon build```.
+Use a standard catkin workspace:
 
-Then ```source install/setup.bash``` to use it.
+```bash
+mkdir -p ~/catkin_ws/src
+cd ~/catkin_ws/src
+git clone https://github.com/your_org/lightning-lm.git
+cd ..
+catkin_make    # or: catkin build
+source devel/setup.bash
+```
 
 ### Build Results
 
@@ -98,14 +107,17 @@ offline programs are suitable for scenarios with offline data packets to quickly
 while the online programs are suitable for scenarios with actual sensors to obtain real-time results.
 
 For example, calling the offline mapping program on the NCLT dataset:
-```ros2 run lightning run_slam_offline --input_bag ~/data/NCLT/20130110/20130110.db3 --config ./config/default_nclt.yaml```
 
-If you want to call the online version, just change the offline part to online.
+```bash
+rosrun lightning run_slam_offline --input_bag ~/data/NCLT/20130110/20130110.bag --config ./config/default_nclt.yaml
+```
+
+For the online version, replace `run_slam_offline` with `run_slam_online`.
 
 ## Testing on Datasets
 
-You can directly use our converted datasets. If you need the original datasets, you need to convert them to the ros2 db3
-format.
+You can directly use our converted ROS1 `.bag` datasets. If you download the original logs, please convert them into
+ROS1 bag files (`.bag`) following your preferred pipeline (e.g., replay the dataset with a driver and use `rosbag record`).
 
 Converted dataset addresses:
 
@@ -122,12 +134,19 @@ Original dataset addresses:
 
 1. Real-time mapping (real-time bag playback)
     - Start the mapping program:
-      ```ros2 run lightning run_slam_online --config ./config/default_nclt.yaml```
-    - Play the data bag
-    - Save the map ```ros2 service call /lightning/save_map lightning/srv/SaveMap "{map_id: new_map}"```
+      ```bash
+      rosrun lightning run_slam_online --config ./config/default_nclt.yaml
+      ```
+    - Play the data bag with `rosbag play your_data.bag`
+    - Save the map
+      ```bash
+      rosservice call /lightning/save_map "map_id: 'new_map'"
+      ```
 2. Offline mapping (traverse data, faster)
-    - ```ros2 run lightning run_slam_offline --config ./config/default_nclt.yaml --input_bag [bag_file]```
-    - It will automatically save to the data/new_map directory after finishing.
+    - ```bash
+      rosrun lightning run_slam_offline --config ./config/default_nclt.yaml --input_bag [bag_file]
+      ```
+    - The map is automatically saved to `data/new_map` after finishing.
 3. Viewing the map
     - View the full map: ```pcl_viewer ./data/new_map/global.pcd```
     - The actual map is stored in blocks, global.pcd is only for displaying the result.
@@ -142,10 +161,14 @@ Original dataset addresses:
       default).
     - Place the vehicle at the mapping starting point.
     - Start the localization program:
-      ```ros2 run lightning run_loc_online --config ./config/default_nclt.yaml```
-    - Play the bag or input sensor data.
+      ```bash
+      rosrun lightning run_loc_online --config ./config/default_nclt.yaml
+      ```
+    - Play the bag or stream live sensor data.
 2. Offline localization
-    - ```ros2 run lightning run_loc_offline --config ./config/default_nclt.yaml --input_bag [bag_file]```
+    - ```bash
+      rosrun lightning run_loc_offline --config ./config/default_nclt.yaml --input_bag [bag_file]
+      ```
 3. Receiving localization results
     - The localization program outputs TF topics at the same frequency as the IMU (50-100Hz).
 
@@ -155,7 +178,7 @@ First, you need to know your LiDAR type and set the corresponding `fasterlio.lid
 2 for Velodyne, 3 for Ouster.
 If it's not one of the above types, you can refer to the Velodyne setup method.
 
-A simpler way is to first record a ros2 bag, get offline mapping and localization working, and then debug the online
+A simpler way is to first record a ROS1 bag, get offline mapping and localization working, and then debug the online
 situation.
 
 You usually need to modify `common.lidar_topic` and `common.imu_topic` to set the LiDAR and IMU topics.
@@ -193,10 +216,11 @@ items include:
 
 ## Miscellaneous
 
-1. Converting ros1 data to ros2
-   Install ``` pip install -i https://pypi.tuna.tsinghua.edu.cn/simple rosbags```
-
-   Convert: ```rosbags-convert --src [your_ROS1_bag_file.bag] --dst [output_ROS2_bag_directory]```
+1. Merging ROS1 bags  
+   Use `scripts/merge_bags.py` to concatenate multiple `.bag` files into a single bag:
+   ```bash
+   python3 scripts/merge_bags.py /path/to/bag_dir /path/to/output.bag
+   ```
 
 ---
 
@@ -257,41 +281,53 @@ Lightning-LM特性：
 
 ### 环境
 
-Ubuntu 22.04 或更高版本。
-
-Ubuntu 20.04 应该也可行，未测试。
+- 推荐 Ubuntu 20.04 + ROS Noetic（desktop-full）。
+- 如果使用 Ubuntu 22.04，可以通过 Docker 或第三方源安装 Noetic。
 
 ### 依赖
 
-- ros2 humble 及以上
-- Pangolin（用于可视化，见thirdparty）
+- ROS Noetic（含 roscpp / tf2_ros / rosbag / pcl_ros / pcl_conversions / catkin）
+- Pangolin（用于可视化，见 thirdparty）
 - OpenCV
 - PCL
 - yaml-cpp
 - glog
 - gflags
-- pcl_conversions
 
-在Ubuntu 22.04上，执行：```bash ./scripts/install_dep.sh```即可。
+在 Ubuntu 20.04/Noetic 上可直接运行：
+
+```bash
+./scripts/install_dep.sh
+```
 
 ### 编译
 
-```colcon build```本包即可。
+在 catkin 工作空间中编译：
 
-然后```source install/setup.bash```即可使用。
+```bash
+mkdir -p ~/catkin_ws/src
+cd ~/catkin_ws/src
+git clone https://github.com/your_org/lightning-lm.git
+cd ..
+catkin_make         # 或 catkin build
+source devel/setup.bash
+```
 
 ### 编译结果
 
-编译后，会得到本包对应的在线/离线建图程序与定位程序。离线程序适用于存在离线数据包，快速得到建图/定位结果的方案，在线程序则适用于有实际传感器，得到实时结果的方案。
+编译后会得到对应的在线/离线建图和定位程序。离线程序适合有离线 bag，想快速得到建图/定位结果的场景；在线程序适合实时传感器输入。
 
-例如：在NCLT数据集上调用离线建图程序:
-```ros2 run lightning run_slam_offline --input_bag ~/data/NCLT/20130110/20130110.db3 --config ./config/default_nclt.yaml```
+例如：在 NCLT 数据集上调用离线建图程序：
 
-如果希望调用在线的版本，则将offline部分改成online即可。
+```bash
+rosrun lightning run_slam_offline --input_bag ~/data/NCLT/20130110/20130110.bag --config ./config/default_nclt.yaml
+```
+
+若需要在线版本，只需把 `run_slam_offline` 替换成 `run_slam_online`。
 
 ## 在数据集上测试
 
-您可以直接使用我们转换完的数据集。如果需要原始的数据集，您需要将它们转换到ros2的db3格式。
+您可以直接使用我们转换好的 ROS1 `.bag` 数据集。如果需要原始数据集，可自行通过驱动回放并使用 `rosbag record` 转换为 `.bag`。
 
 转换后的数据集地址：
 
@@ -308,12 +344,19 @@ Ubuntu 20.04 应该也可行，未测试。
 
 1. 实时建图（实时播包）
     - 启动建图程序:
-      ```ros2 run lightning run_slam_online --config ./config/default_nclt.yaml```
-    - 播放数据包
-    - 保存地图 ```ros2 service call /lightning/save_map lightning/srv/SaveMap "{map_id: new_map}"```
+      ```bash
+      rosrun lightning run_slam_online --config ./config/default_nclt.yaml
+      ```
+    - 用 `rosbag play your_data.bag` 播放数据包
+    - 保存地图
+      ```bash
+      rosservice call /lightning/save_map "map_id: 'new_map'"
+      ```
 2. 离线建图（遍历跑数据，更快一些）
-    - ```ros2 run lightning run_slam_offline --config ./config/default_nclt.yaml --input_bag 数据包```
-    - 结束后会自动保存至data/new_map目录下
+    - ```bash
+      rosrun lightning run_slam_offline --config ./config/default_nclt.yaml --input_bag 数据包
+      ```
+    - 结束后会自动保存至 `data/new_map` 目录下
 3. 查看地图
     - 查看完整地图：```pcl_viewer ./data/new_map/global.pcd```
     - 实际地图是分块存储的，global.pcd仅用于显示结果
@@ -326,11 +369,15 @@ Ubuntu 20.04 应该也可行，未测试。
     - 将地图路径写到yaml中的 system-map_path 下，默认是new_map（和建图默认一致)
     - 将车放在建图起点处
     - 启动定位程序：
-      ```ros2 run lightning run_loc_online --config ./config/default_nclt.yaml```
-    - 播包或者输入传感器数据即可
+      ```bash
+      rosrun lightning run_loc_online --config ./config/default_nclt.yaml
+      ```
+    - 播包或者输入实时传感器数据即可
 
 2. 离线定位
-    - ```ros2 run lightning run_loc_offline --config ./config/default_nclt.yaml --input_bag 数据包```
+    - ```bash
+      rosrun lightning run_loc_offline --config ./config/default_nclt.yaml --input_bag 数据包
+      ```
 
 3. 接收定位结果
     - 定位程序输出与IMU同频的TF话题（50-100Hz）
@@ -340,7 +387,7 @@ Ubuntu 20.04 应该也可行，未测试。
 首先您需要知道自己的雷达类型，设置对应的fasterlio.lidar_type类型。livox系列的配置成1，Velodyne的设置成2,ouster设置成3.
 如果不在以上种类，可以参考velodyne的设置方式。
 
-比较简单的方式是先录一个ros2的数据包，将离线的建图、定位调通后，再去调试在线的情况。
+比较简单的方式是先录一个 ROS1 数据包，将离线建图、定位调通后，再去调试在线的情况。
 
 您通常需要修改common.lidar_topic和common.imu_topic来设置雷达与imu的话题。
 
@@ -373,8 +420,8 @@ imu和雷达外参默认为零就好，我们对这个不敏感。
 
 ## 其他
 
-1. 将ros1数据转换至ros2
-   安装 ``` pip install -i https://pypi.tuna.tsinghua.edu.cn/simple rosbags```
-
-   转换: ```rosbags-convert --src [你的ROS1_bag文件.bag] --dst [输出ROS2bag目录]```
-
+1. 合并 ROS1 bag  
+   使用 `scripts/merge_bags.py` 可以把多个 `.bag` 合并为一个：
+   ```bash
+   python3 scripts/merge_bags.py /path/to/bag_dir /path/to/output.bag
+   ```

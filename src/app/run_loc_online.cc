@@ -4,6 +4,7 @@
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+#include <ros/ros.h>
 
 #include "core/system/loc_system.h"
 #include "ui/pangolin_window.h"
@@ -20,7 +21,7 @@ int main(int argc, char** argv) {
     google::ParseCommandLineFlags(&argc, &argv, true);
     using namespace lightning;
 
-    rclcpp::init(argc, argv);
+    ros::init(argc, argv, "run_loc_online");
 
     LocSystem::Options opt;
     LocSystem loc(opt);
@@ -33,7 +34,7 @@ int main(int argc, char** argv) {
     loc.SetInitPose(SE3());
     loc.Spin();
 
-    rclcpp::shutdown();
+    ros::shutdown();
 
     return 0;
 }

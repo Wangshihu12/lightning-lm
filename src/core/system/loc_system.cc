@@ -2,6 +2,8 @@
 // Created by xiang on 25-9-12.
 //
 
+#include <signal.h>
+
 #include "core/system/loc_system.h"
 #include "core/localization/localization.h"
 #include "io/yaml_io.h"
@@ -25,19 +27,19 @@ bool LocSystem::Init(const std::string &yaml_path) {
 
     std::string map_path = yaml.GetValue<std::string>("system", "map_path");
 
-    LOG(INFO) << "online mode, creating ros2 node ... ";
+    LOG(INFO) << "online mode, creating ros node ... ";
 
     /// subscribers
-    node_ = std::make_shared<rclcpp::Node>("lightning_slam");
+    node_ = std::make_shared<ros::NodeHandle>("lightning_loc");
 
     imu_topic_ = yaml.GetValue<std::string>("common", "imu_topic");
     cloud_topic_ = yaml.GetValue<std::string>("common", "lidar_topic");
     livox_topic_ = yaml.GetValue<std::string>("common", "livox_lidar_topic");
 
-    rclcpp::QoS qos(10);
+    constexpr int kQueueSize = 10;
 
-    imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
-        imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
+    imu_sub_ = node_->subscribe<sensor_msgs::Imu>(
+        imu_topic_, kQueueSize, [this](const sensor_msgs::ImuConstPtr& msg) {
             IMUPtr imu = std::make_shared<IMU>();
             imu->timestamp = ToSec(msg->header.stamp);
             imu->linear_acceleration =
@@ -47,20 +49,20 @@ bool LocSystem::Init(const std::string &yaml_path) {
             ProcessIMU(imu);
         });
 
-    cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-        cloud_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+    cloud_sub_ = node_->subscribe<sensor_msgs::PointCloud2>(
+        cloud_topic_, kQueueSize, [this](const sensor_msgs::PointCloud2ConstPtr& cloud) {
             Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
         });
 
-    livox_sub_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-        livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg ::SharedPtr cloud) {
+    livox_sub_ = node_->subscribe<livox_ros_driver2::CustomMsg>(
+        livox_topic_, kQueueSize, [this](const livox_ros_driver2::CustomMsgConstPtr& cloud) {
             Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
         });
 
     if (options_.pub_tf_) {
-        tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(node_);
+        tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>();
         loc_->SetTFCallback(
-            [this](const geometry_msgs::msg::TransformStamped &pose) { tf_broadcaster_->sendTransform(pose); });
+            [this](const geometry_msgs::TransformStamped &pose) { tf_broadcaster_->sendTransform(pose); });
     }
 
     bool ret = loc_->Init(yaml_path, map_path);
@@ -85,13 +87,13 @@ void LocSystem::ProcessIMU(const IMUPtr &imu) {
     }
 }
 
-void LocSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr &cloud) {
+void LocSystem::ProcessLidar(const sensor_msgs::PointCloud2ConstPtr &cloud) {
     if (loc_started_) {
         loc_->ProcessLidarMsg(cloud);
     }
 }
 
-void LocSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr &cloud) {
+void LocSystem::ProcessLidar(const livox_ros_driver2::CustomMsgConstPtr &cloud) {
     if (loc_started_) {
         loc_->ProcessLivoxLidarMsg(cloud);
     }
@@ -99,7 +101,7 @@ void LocSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr 
 
 void LocSystem::Spin() {
     if (node_ != nullptr) {
-        spin(node_);
+        ros::spin();
     }
 }
 

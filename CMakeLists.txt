@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.10)
 
 project(lightning)
 
@@ -19,7 +19,6 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O2 -fopenmp -fPIC -g -ggdb")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -ggdb -g -fopenmp -fPIC -g")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -g")
 
-
 if (CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif ()
@@ -28,35 +27,52 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 # set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/libs)
 # set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/libs)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-include(cmake/packages.cmake)
+find_package(catkin REQUIRED COMPONENTS
+        roscpp
+        std_msgs
+        geometry_msgs
+        sensor_msgs
+        nav_msgs
+        std_srvs
+        visualization_msgs
+        tf2
+        tf2_ros
+        pcl_conversions
+        pcl_ros
+        message_generation
+        rosbag
+        livox_ros_driver2
+)
 
-# msg 和 srv
-set(MY_SRV_FILES "")
-set(SRC_DIR ${PROJECT_SOURCE_DIR}/srv)
-file(GLOB_RECURSE SRC_FILES ${SRC_DIR}/*.srv)
-foreach (SRC_FILE ${SRC_FILES})
-    file(RELATIVE_PATH REL_PATH ${SRC_DIR} ${SRC_FILE})
-    list(APPEND MY_SRV_FILES ${PROJECT_SOURCE_DIR}:srv/${REL_PATH})
-endforeach ()
+add_service_files(
+        DIRECTORY srv
+        FILES LocCmd.srv SaveMap.srv
+)
 
-rosidl_generate_interfaces(${PROJECT_NAME}
-        ${MY_SRV_FILES}
-        ${MY_MSG_FILES}
-        ${MY_ACTION_FILES}
+generate_messages(
         DEPENDENCIES std_msgs geometry_msgs sensor_msgs nav_msgs
 )
 
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+include(cmake/packages.cmake)
+
+catkin_package(
+        LIBRARIES ${PROJECT_NAME}.libs miao.core miao.utils
+        CATKIN_DEPENDS message_runtime roscpp std_msgs geometry_msgs sensor_msgs nav_msgs std_srvs visualization_msgs
+        tf2 tf2_ros pcl_conversions pcl_ros rosbag livox_ros_driver2
+        DEPENDS Eigen3 OpenCV PCL OpenGL glog yaml-cpp Pangolin
+        INCLUDE_DIRS src ${PROJECT_SOURCE_DIR}/thirdparty
+)
+
 include_directories(
-        ${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp
+        ${catkin_INCLUDE_DIRS}
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/thirdparty
+        ${THIRD_PARTY_INCLUDE_DIRS}
 )
 
 install(DIRECTORY config
-        DESTINATION lib/${PROJECT_NAME}/
+        DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
 )
 
-add_subdirectory(thirdparty/livox_ros_driver)
-
 add_subdirectory(src)
-
-ament_package()

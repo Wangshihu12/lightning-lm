@@ -4,6 +4,7 @@
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+#include <ros/ros.h>
 
 #include "core/system/slam.h"
 #include "utils/timer.h"
@@ -21,8 +22,7 @@ int main(int argc, char** argv) {
 
     using namespace lightning;
 
-    /// 需要rclcpp::init
-    rclcpp::init(argc, argv);
+    ros::init(argc, argv, "run_slam_online");
 
     SlamSystem::Options options;
     options.online_mode_ = true;
@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
 
     Timer::PrintAll();
 
-    rclcpp::shutdown();
+    ros::shutdown();
 
     LOG(INFO) << "done";
 

@@ -123,7 +123,7 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
     return true;
 }
 
-void Localization::ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+void Localization::ProcessLidarMsg(const sensor_msgs::PointCloud2ConstPtr cloud) {
     UL lock(global_mutex_);
     if (lidar_loc_ == nullptr || lio_ == nullptr || pgo_ == nullptr) {
         return;
@@ -132,7 +132,7 @@ void Localization::ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPt
     // 串行模式
     CloudPtr laser_cloud(new PointCloudType);
     preprocess_->Process(cloud, laser_cloud);
-    laser_cloud->header.stamp = cloud->header.stamp.sec * 1e9 + cloud->header.stamp.nanosec;
+    laser_cloud->header.stamp = cloud->header.stamp.sec * 1e9 + cloud->header.stamp.nsec;
 
     if (options_.online_mode_) {
         lidar_odom_proc_cloud_.AddMessage(laser_cloud);
@@ -141,7 +141,7 @@ void Localization::ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPt
     }
 }
 
-void Localization::ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
+void Localization::ProcessLivoxLidarMsg(const livox_ros_driver2::CustomMsgConstPtr cloud) {
     UL lock(global_mutex_);
     if (lidar_loc_ == nullptr || lio_ == nullptr || pgo_ == nullptr) {
         return;
@@ -150,7 +150,7 @@ void Localization::ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg:
     // 串行模式
     CloudPtr laser_cloud(new PointCloudType);
     preprocess_->Process(cloud, laser_cloud);
-    laser_cloud->header.stamp = cloud->header.stamp.sec * 1e9 + cloud->header.stamp.nanosec;
+    laser_cloud->header.stamp = cloud->header.stamp.sec * 1e9 + cloud->header.stamp.nsec;
 
     if (options_.online_mode_) {
         lidar_odom_proc_cloud_.AddMessage(laser_cloud);
@@ -213,7 +213,7 @@ void Localization::LidarLocProcCloud(CloudPtr scan_undist) {
     }
 
     if (loc_state_callback_) {
-        auto loc_state = std::make_shared<std_msgs::msg::Int32>();
+        auto loc_state = std::make_shared<std_msgs::Int32>();
         loc_state->data = static_cast<int>(res.status_);
         LOG(INFO) << "loc_state: " << loc_state->data;
         loc_state_callback_(*loc_state);
@@ -262,7 +262,7 @@ void Localization::ProcessIMUMsg(IMUPtr imu) {
     pgo_->ProcessDR(dr_state);
 }
 
-// void Localization::ProcessOdomMsg(const nav_msgs::msg::Odometry::SharedPtr odom_msg) {
+// void Localization::ProcessOdomMsg(const nav_msgs::Odometry::SharedPtr odom_msg) {
 //     UL lock(global_mutex_);
 //
 //     if (lidar_loc_ == nullptr || lio_ == nullptr || pgo_ == nullptr) {

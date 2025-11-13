@@ -8,16 +8,15 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <signal.h>
 
-#include <nav_msgs/msg/odometry.hpp>
-#include <rclcpp/serialization.hpp>
-#include <rclcpp/serialized_message.hpp>
-#include <rosbag2_cpp/reader.hpp>
-#include <sensor_msgs/msg/imu.hpp>
-#include <sensor_msgs/msg/laser_scan.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <nav_msgs/Odometry.h>
+#include <sensor_msgs/Imu.h>
+#include <sensor_msgs/LaserScan.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <rosbag/message_instance.h>
 
-#include "livox_ros_driver2/msg/custom_msg.hpp"
+#include "livox_ros_driver2/CustomMsg.h"
 
 #include "common/imu.h"
 #include "common/odom.h"
@@ -41,14 +40,14 @@ class RosbagIO {
         signal(SIGINT, lightning::debug::SigHandle);
     }
 
-    using MsgType = std::shared_ptr<rosbag2_storage::SerializedBagMessage>;
+    using MsgType = rosbag::MessageInstance;
     using MessageProcessFunction = std::function<bool(const MsgType &m)>;
 
     /// 一些方便直接使用的topics, messages
-    using Scan2DHandle = std::function<bool(sensor_msgs::msg::LaserScan::SharedPtr)>;
+    using Scan2DHandle = std::function<bool(const sensor_msgs::LaserScanConstPtr &)>;
 
-    using PointCloud2Handle = std::function<bool(sensor_msgs::msg::PointCloud2::SharedPtr)>;
-    using LivoxCloud2Handle = std::function<bool(livox_ros_driver2::msg::CustomMsg::SharedPtr)>;
+    using PointCloud2Handle = std::function<bool(const sensor_msgs::PointCloud2ConstPtr &)>;
+    using LivoxCloud2Handle = std::function<bool(const livox_ros_driver2::CustomMsgConstPtr &)>;
     using FullPointCloudHandle = std::function<bool(FullCloudPtr)>;
     using ImuHandle = std::function<bool(IMUPtr)>;
     using OdomHandle = std::function<bool(const OdomPtr &)>;
@@ -67,31 +66,32 @@ class RosbagIO {
 
     /// point cloud 2 处理
     RosbagIO &AddPointCloud2Handle(const std::string &topic_name, PointCloud2Handle f) {
-        return AddHandle(topic_name, [f, this](const MsgType &m) -> bool {
-            auto msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
-            rclcpp::SerializedMessage data(*m->serialized_data);
-            seri_cloud2_.deserialize_message(&data, msg.get());
-
+        return AddHandle(topic_name, [f](const MsgType &m) -> bool {
+            auto msg = m.instantiate<sensor_msgs::PointCloud2>();
+            if (!msg) {
+                return true;
+            }
             return f(msg);
         });
     }
 
     /// livox 处理
     RosbagIO &AddLivoxCloudHandle(const std::string &topic_name, LivoxCloud2Handle f) {
-        return AddHandle(topic_name, [f, this](const MsgType &m) -> bool {
-            auto msg = std::make_shared<livox_ros_driver2::msg::CustomMsg>();
-            rclcpp::SerializedMessage data(*m->serialized_data);
-            seri_livox_.deserialize_message(&data, msg.get());
-
+        return AddHandle(topic_name, [f](const MsgType &m) -> bool {
+            auto msg = m.instantiate<livox_ros_driver2::CustomMsg>();
+            if (!msg) {
+                return true;
+            }
             return f(msg);
         });
     }
 
     RosbagIO &AddImuHandle(const std::string &topic_name, ImuHandle f) {
-        return AddHandle(topic_name, [f, this](const MsgType &m) -> bool {
-            auto msg = std::make_shared<sensor_msgs::msg::Imu>();
-            rclcpp::SerializedMessage data(*m->serialized_data);
-            seri_imu_.deserialize_message(&data, msg.get());
+        return AddHandle(topic_name, [f](const MsgType &m) -> bool {
+            auto msg = m.instantiate<sensor_msgs::Imu>();
+            if (!msg) {
+                return true;
+            }
 
             IMUPtr imu = std::make_shared<IMU>();
             imu->timestamp = ToSec(msg->header.stamp);
@@ -106,9 +106,10 @@ class RosbagIO {
     /// odom 处理
     // RosbagIO &AddOdomHandle(const std::string &topic_name, OdomHandle f) {
     //     return AddHandle(topic_name, [f, this](const MsgType &m) -> bool {
-    //         auto msg = std::make_shared<nav_msgs::msg::Odometry>();
-    //         rclcpp::SerializedMessage data(*m->serialized_data);
-    //         seri_odom_.deserialize_message(&data, msg.get());
+    //         auto msg = m.instantiate<nav_msgs::Odometry>();
+    //         if (!msg) {
+    //             return true;
+    //         }
 
     //         /// nav_msg 的 odometry 转 odom
     //         return f(msg);
@@ -120,12 +121,6 @@ class RosbagIO {
 
    private:
     std::map<std::string, MessageProcessFunction> process_func_;
-
-    /// 序列化
-    rclcpp::Serialization<nav_msgs::msg::Odometry> seri_odom_;
-    rclcpp::Serialization<sensor_msgs::msg::Imu> seri_imu_;
-    rclcpp::Serialization<sensor_msgs::msg::PointCloud2> seri_cloud2_;
-    rclcpp::Serialization<livox_ros_driver2::msg::CustomMsg> seri_livox_;
 
     std::string bag_file_;
     DatasetType dataset_type_ = DatasetType::NCLT;
